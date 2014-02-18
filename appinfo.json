@@ -1,0 +1,17 @@
+{
+  "uuid": "0eb0435b-040c-405b-9619-68ef9b961aa1",
+  "shortName": "Snakey",
+  "longName": "Snakey",
+  "companyName": "@phun",
+  "versionCode": 1,
+  "versionLabel": "1.0.0",
+  "watchapp": {
+    "watchface": false
+  },
+  "appKeys": {
+    "dummy": 0
+  },
+  "resources": {
+    "media": []
+  }
+}
