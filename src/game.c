@@ -336,6 +336,7 @@ static void game_layer_update_proc(Layer *layer, GContext *ctx)
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
    game->queued_input = 3;
+//    debrief_user_with_score(56); // for screenshot purposes
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
