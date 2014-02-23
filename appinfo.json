@@ -3,8 +3,8 @@
   "shortName": "Snakey",
   "longName": "Snakey",
   "companyName": "@phun",
-  "versionCode": 1,
-  "versionLabel": "1.0.0",
+  "versionCode": 1.1,
+  "versionLabel": "1.1",
   "watchapp": {
     "watchface": false
   },

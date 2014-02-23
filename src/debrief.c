@@ -1,10 +1,7 @@
 #include <pebble.h>
 #include "debrief.h"
 
-#define min(a,b) \
-   ({ __typeof__ (a) _a = (a); \
-       __typeof__ (b) _b = (b); \
-     _a < _b ? _a : _b; })
+#define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
 
 static Window *debrief_window;
 
@@ -69,13 +66,12 @@ void debrief_user_with_score(unsigned score)
     const bool animated = true;
     window_stack_push(debrief_window, animated);
 
-    static char score_text[12];
+    static char score_text[8];
     snprintf(score_text, sizeof(score_text), "%d", score);
     text_layer_set_text(debrief_score_layer, score_text);
 
-    // TODO: put a better rank system
-    unsigned adjusted_score = min((unsigned)63, score);
-    unsigned title_index = (unsigned)(adjusted_score / 7);
+    unsigned adjusted_score = min((unsigned)189, score);
+    unsigned title_index = (unsigned)(adjusted_score / 21);
 
     text_layer_set_text(debrief_title_layer, title_strings[title_index]);
 

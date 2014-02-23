@@ -6,10 +6,11 @@
 #define SNAKE_BODY_SPACING 0
 #define APPLE_SIZE 5
 #define GAME_TICK_INTERVAL 100
-#define GRAPHICS_UPDATE_INTERVAL 100
 #define STATUS_BAR_HEIGHT 16
 #define BOUNDS_ADJUSTMENT 2
 #define DEFAULT_SNAKE_SIZE 3
+#define SNAKE_CONTACT_LENIENCY 1.5
+#define BONUS_TIMER_INVTERVAL 500
 
 static float container_width = 100;
 static float container_height = 100;
@@ -21,6 +22,7 @@ typedef struct snake_section_t {
 } snake_section_t;
 
 typedef struct snake_t {
+    unsigned length;
 	unsigned direction; // Directions are 0 - Right, 1 - Down, 2 - Left, 3 - Up
 	struct snake_section_t *head;
 } snake_t;
@@ -35,6 +37,7 @@ typedef struct game_state_t {
     unsigned is_paused;
     unsigned is_resetting;
     unsigned score;
+    unsigned bonus_points; // Bonus points decreases the longer the user takes to eat the apple
     unsigned queued_input; // 0 - Nothing, 1 - Up, 2 - Down, 3 - Pause
 } game_state_t;
 
@@ -44,11 +47,27 @@ static Layer *game_layer;
 static game_state_t *game;
 static snake_t *snake;
 static apple_t *apple;
-static AppTimer *game_timer;
-static AppTimer *graphics_timer;
 
-static TextLayer *game_score_layer;
-static TextLayer *game_clock_layer;
+static AppTimer *game_timer;
+static AppTimer *bonus_points_timer;
+
+static TextLayer *game_score_label;
+static TextLayer *game_bonus_label;
+
+//--------------------------------------------- 
+// Convenience Methods
+//---------------------------------------------
+
+// Used to place the apple on a grid
+// spaced to the width of the apple
+int round_to_nearest_multiple(int number, int multiple)
+{
+    if (multiple == 0) {
+        return number;
+    }
+    int remain = number % multiple;
+    return (remain == 0) ? number : number + multiple - remain;
+}
 
 //--------------------------------------------- 
 // Snake Methods
@@ -88,6 +107,8 @@ static void add_to_head(snake_t *snake)
 static void move_snake(snake_t *snake)
 {
     // Check the bounds
+    // If the snake has gone beyond the edge,
+    // mkae the head appear on the other side
     snake_section_t *current_head = snake->head;
     if (current_head->x > container_width) {
         current_head->x = -SNAKE_BODY_WIDTH;
@@ -139,17 +160,32 @@ static void move_snake(snake_t *snake)
 static unsigned snake_has_eaten_apple(snake_t *snake, apple_t *apple) 
 {
     snake_section_t *current_head = snake->head;
-    return (abs(current_head->x - apple->x) < 1.5*APPLE_SIZE && abs(current_head->y - apple->y) < 1.5*APPLE_SIZE);
+    return (abs(current_head->x - apple->x) < SNAKE_CONTACT_LENIENCY*APPLE_SIZE && 
+            abs(current_head->y - apple->y) < SNAKE_CONTACT_LENIENCY*APPLE_SIZE);
 }
 
 static void move_apple()
 {
     srand(time(NULL));
     int random = rand();
-    apple->x = (random % (int)(container_width - 2*SNAKE_BODY_WIDTH)) + 1;
-    apple->y = (random % (int)(container_height - 2*SNAKE_BODY_WIDTH)) + 1;
+
+    apple->x = round_to_nearest_multiple(random % (int)(container_width - 2*SNAKE_BODY_WIDTH), APPLE_SIZE);
+    apple->y = round_to_nearest_multiple(random % (int)(container_height - 2*SNAKE_BODY_WIDTH - STATUS_BAR_HEIGHT), APPLE_SIZE);
     
-    if (abs(apple->x - snake->head->x) < 10 && abs(apple->y - snake->head->y) < 10 ) {
+    // Check that the apple has not moved to an area
+    // where the snake body currently is
+    unsigned is_bad_placement = 0;
+    snake_section_t *current_section = snake->head;
+    while (current_section) {
+        // If the apple is placed near a body section,
+        // put up a flag to move it
+        if (abs(apple->x - current_section->x) < 2*APPLE_SIZE && abs(apple->y - current_section->y) < 2*APPLE_SIZE ) {
+            is_bad_placement = 1;
+            break;
+        }
+        current_section = current_section->next;
+    }
+    if (is_bad_placement) {
         move_apple();
     }
 }
@@ -208,14 +244,24 @@ static void game_setup()
     game->alive = 1;
     snake->direction = 0;
     game->is_resetting = 0;
+    game->bonus_points = 0;
     
     // Make the snake as long
     for (int i = 1; i < DEFAULT_SNAKE_SIZE; ++i) {
         add_to_head(snake);
     }
+    snake->length = DEFAULT_SNAKE_SIZE;
 
     // Move apple to random location
     move_apple();
+}
+
+static void bonus_timer_callback(void *data)
+{
+    if (game->bonus_points > 0) {
+        game->bonus_points -= 1;
+        bonus_points_timer = app_timer_register(BONUS_TIMER_INVTERVAL, bonus_timer_callback, NULL);
+    }
 }
 
 static void game_tick(void *data)
@@ -270,13 +316,23 @@ static void game_tick(void *data)
         add_to_head(snake);
         // Move apple
         move_apple();
-        game->score += 1;
+        game->score += (1 + game->bonus_points);
+        snake->length += 1;
         vibes_short_pulse();
-    }
-}
 
-static void graphics_timer_callback(void *data)
-{
+        if (game->bonus_points == 0) {
+            bonus_points_timer = app_timer_register(BONUS_TIMER_INVTERVAL, bonus_timer_callback, NULL);
+        }
+
+        game->bonus_points = snake->length / 2;
+        
+    }
+
+    // Update the graphics
+    // Note: this could be moved to a separate graphics update interval
+    // But since the game tick here is the same as the graphics tick
+    // I saw no need to do two timers
+
     layer_mark_dirty(game_layer);
     
     static char score_text[12];
@@ -287,28 +343,18 @@ static void graphics_timer_callback(void *data)
     } else {
         snprintf(score_text, sizeof(score_text), "Score: %d ", game->score);   
     }
-    text_layer_set_text(game_score_layer, score_text);
 
-    if (game->alive && !game->is_resetting) {
-        graphics_timer = app_timer_register(GRAPHICS_UPDATE_INTERVAL, graphics_timer_callback, NULL);
-    }
+    text_layer_set_text(game_score_label, score_text);
+
+    static char bonus_text[12];
+    snprintf(bonus_text, sizeof(bonus_text), "Bonus: %d", game->bonus_points);
+    text_layer_set_text(game_bonus_label, bonus_text);
 }
 
 static void game_start()
 {
     game_setup();
     game_timer = app_timer_register(GAME_TICK_INTERVAL, game_tick, NULL);
-    graphics_timer = app_timer_register(GRAPHICS_UPDATE_INTERVAL, graphics_timer_callback, NULL);
-}
-
-//--------------------------------------------- 
-// Time Display
-//---------------------------------------------
-static void handle_minute_tick(struct tm *tick_time, TimeUnits units_changes)
-{
-    static char time_text[] = "00:00";
-    strftime(time_text, sizeof(time_text), "%T", tick_time);
-    text_layer_set_text(game_clock_layer, time_text);
 }
 
 //--------------------------------------------- 
@@ -336,7 +382,6 @@ static void game_layer_update_proc(Layer *layer, GContext *ctx)
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
    game->queued_input = 3;
-//    debrief_user_with_score(56); // for screenshot purposes
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -371,23 +416,19 @@ static void window_load(Window *window) {
     layer_set_update_proc(game_layer, game_layer_update_proc);
     layer_add_child(window_layer, game_layer);
 
-    game_score_layer = text_layer_create(GRect(0, -BOUNDS_ADJUSTMENT, bounds.size.w, STATUS_BAR_HEIGHT));
-    text_layer_set_background_color(game_score_layer, GColorBlack);
-    text_layer_set_text_color(game_score_layer, GColorWhite);
-    text_layer_set_text_alignment(game_score_layer, GTextAlignmentRight);
-    layer_add_child(window_layer, text_layer_get_layer(game_score_layer));
-    text_layer_set_font(game_score_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+    game_score_label = text_layer_create(GRect(0, -BOUNDS_ADJUSTMENT, bounds.size.w, STATUS_BAR_HEIGHT));
+    text_layer_set_background_color(game_score_label, GColorBlack);
+    text_layer_set_text_color(game_score_label, GColorWhite);
+    text_layer_set_text_alignment(game_score_label, GTextAlignmentRight);
+    layer_add_child(window_layer, text_layer_get_layer(game_score_label));
+    text_layer_set_font(game_score_label, fonts_get_system_font(FONT_KEY_GOTHIC_14));
 
-    game_clock_layer = text_layer_create(GRect(0, -BOUNDS_ADJUSTMENT, bounds.size.w, STATUS_BAR_HEIGHT));
-    text_layer_set_text_color(game_clock_layer, GColorWhite);
-    text_layer_set_background_color(game_clock_layer, GColorClear);
-    layer_add_child(window_layer, text_layer_get_layer(game_clock_layer));
-    text_layer_set_font(game_clock_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+    game_bonus_label = text_layer_create(GRect(0, -BOUNDS_ADJUSTMENT, bounds.size.w, STATUS_BAR_HEIGHT));
+    text_layer_set_text_color(game_bonus_label, GColorWhite);
+    text_layer_set_background_color(game_bonus_label, GColorClear);
+    layer_add_child(window_layer, text_layer_get_layer(game_bonus_label));
+    text_layer_set_font(game_bonus_label, fonts_get_system_font(FONT_KEY_GOTHIC_14));
 
-    time_t now = time(NULL);
-    struct tm *current_time = localtime(&now);
-    handle_minute_tick(current_time, MINUTE_UNIT);
-    tick_timer_service_subscribe(MINUTE_UNIT, &handle_minute_tick);
 }
 
 static void window_appear(Window *window)
@@ -404,8 +445,8 @@ static void window_disappear(Window *window) {
 
 static void window_unload(Window *window) {
     game_end(0);
-    text_layer_destroy(game_clock_layer);
-    text_layer_destroy(game_score_layer);
+    text_layer_destroy(game_bonus_label);
+    text_layer_destroy(game_score_label);
     layer_destroy(game_layer);
 }
 
@@ -429,7 +470,6 @@ void game_init(void) {
 }
 
 void game_deinit(void) {
-    free(graphics_timer);
     free(game_timer);
     free(game);
     free(snake);
