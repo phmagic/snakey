@@ -246,7 +246,7 @@ static void game_setup()
     game->is_resetting = 0;
     game->bonus_points = 0;
     
-    // Make the snake as long
+    // Make the snake as long as the default size
     for (int i = 1; i < DEFAULT_SNAKE_SIZE; ++i) {
         add_to_head(snake);
     }
