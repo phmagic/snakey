@@ -470,7 +470,6 @@ void game_init(void) {
 }
 
 void game_deinit(void) {
-    free(game_timer);
     free(game);
     free(snake);
     free(apple);
